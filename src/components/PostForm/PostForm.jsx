@@ -6,11 +6,19 @@ import { useNavigate } from "react-router-dom";
 import { useSelector } from "react-redux";
 
 export default function PostForm({ post }) {
-    const { register, handleSubmit, watch, setValue, control, getValues } = useForm({
+    const {
+        register,
+        handleSubmit,
+        watch,
+        setValue,
+        control,
+        getValues,
+        formState: { errors },
+    } = useForm({
         defaultValues: {
             title: post?.title || "",
-            slug: post?.$id || "",
-            Content: post?.Content || "",
+            slug: post?.slug || post?.$id || "",
+            content: post?.Content || post?.content || "",
             status: post?.status || "active",
         },
     });
@@ -19,36 +27,68 @@ export default function PostForm({ post }) {
     const userData = useSelector((state) => state.auth.userData);
 
     const submit = async (data) => {
-        console.log("Submitting data:", data);
-        console.log("Post object:", post);
+        try {
+            console.log("Submitting data:", data);
+            console.log("Post object:", post);
 
-        if (post) {
-            const file = data.image[0] ? await appwriteService.uploadFile(data.image[0]) : null;
+            const fileList = data.image && data.image.length ? data.image : null;
+            const fileProvided = fileList && fileList[0];
 
-            if (file) {
-                appwriteService.deleteFile(post.featuredImage);
-            }
+            if (post) {
+                let uploadedFile = null;
+                if (fileProvided) {
+                    uploadedFile = await appwriteService.uploadFile(fileList[0]);
+                    if (uploadedFile && post.featuredImage) {
+                        try {
+                            await appwriteService.deleteFile(post.featuredImage);
+                        } 
+                        catch (err) {
+                            console.warn("Failed to delete previous featured image:", err);
+                        }
+                    }
+                }
 
-            const dbPost = await appwriteService.updatePost(post.$id, {
-                ...data,
-                featuredImage: file ? file.$id : undefined,
-            });
-
-            if (dbPost) {
-                navigate(`/post/${dbPost.$id}`);
-            }
-        } else {
-            const file = await appwriteService.uploadFile(data.image[0]);
-
-            if (file) {
-                const fileId = file.$id;
-                data.featuredImage = fileId;
-                const dbPost = await appwriteService.createPost({...data, userID: userData.$id});
+                const dbPost = await appwriteService.updatePost(post.$id, {
+                    title: data.title,
+                    slug: data.slug,
+                    Content: data.content,
+                    status: data.status,
+                    featuredImage: uploadedFile ? uploadedFile.$id : post.featuredImage,
+                });
 
                 if (dbPost) {
                     navigate(`/post/${dbPost.$id}`);
                 }
+                return;
             }
+
+            let uploadedFile = null;
+            if (fileProvided) {
+                uploadedFile = await appwriteService.uploadFile(fileList[0]);
+            }
+
+            const payload = {
+                title: data.title,
+                slug: data.slug,
+                Content: data.content,
+                status: data.status,
+                featuredImage: uploadedFile ? uploadedFile.$id : undefined,
+            };
+
+            if (userData && userData.$id) {
+                payload.userID = userData.$id;
+            } 
+            else {
+                console.warn("No userData available; creating post without userID");
+            }
+
+            const dbPost = await appwriteService.createPost(payload);
+            if (dbPost) {
+                navigate(`/post/${dbPost.$id}`);
+            }
+        } 
+        catch (err) {
+            console.error("Error submitting post:", err);
         }
     };
 
@@ -58,19 +98,22 @@ export default function PostForm({ post }) {
                 .trim()
                 .toLowerCase()
                 .replace(/[^a-zA-Z\d\s]+/g, "-")
-                .replace(/\s/g, "-");
-
+                .replace(/\s+/g, "-");
         return "";
     }, []);
 
     useEffect(() => {
         const subscription = watch((value, { name }) => {
             if (name === "title") {
-                setValue("slug", slugTransform(value.title), { shouldValidate: true });
+                setValue("slug", slugTransform(value.title || ""), { shouldValidate: true });
             }
         });
 
-        return () => subscription.unsubscribe();
+        return () => {
+            if (subscription && typeof subscription.unsubscribe === "function") {
+                subscription.unsubscribe();
+            }
+        };
     }, [watch, slugTransform, setValue]);
 
     return (
@@ -90,25 +133,25 @@ export default function PostForm({ post }) {
                     }}
                 />
             </div>
+
             <div className="formContent">
-                <RTE label="Content :" name="Content" control={control} defaultValue={getValues("Content")} />
+                <RTE label="Content :" name="content" control={control} defaultValue={getValues("content")} />
             </div>
+
             <div className="formRest">
                 <Input
                     label="Featured Image :"
                     type="file"
                     accept="image/png, image/jpg, image/jpeg, image/gif"
-                    {...register("image", { required: !post })}
+                    {...register("image")}
                 />
                 {post?.featuredImage && (
                     <div>
-                        <img
-                            src={appwriteService.getFilePreview(post.featuredImage)}
-                            alt={post.title}
-                        />
+                        <img src={appwriteService.getFileView(post.featuredImage)} alt={post.title} />
                     </div>
                 )}
-                <Select className="formActive"
+                <Select
+                    className="formActive"
                     options={["active", "inactive"]}
                     label="Status"
                     {...register("status", { required: true })}
@@ -117,6 +160,9 @@ export default function PostForm({ post }) {
                     {post ? "Update" : "Submit"}
                 </Button>
             </div>
+
+            {errors.title && <div className="error">Title is required</div>}
+            {errors.slug && <div className="error">Slug is required</div>}
         </form>
     );
 }

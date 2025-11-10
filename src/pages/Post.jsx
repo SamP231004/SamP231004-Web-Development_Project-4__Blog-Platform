@@ -36,10 +36,7 @@ export default function Post() {
         <div className="PostContainer">
             {/* <Container> */}
                 <div className="PostImageContainer">
-                    <img
-                        src={appwriteService.getFilePreview(post.featuredImage)}
-                        alt={post.title}
-                    />
+                    <img src={appwriteService.getFileView(post.featuredImage)} alt={post.title} />
 
                     {isAuthor && (
                         <div>
